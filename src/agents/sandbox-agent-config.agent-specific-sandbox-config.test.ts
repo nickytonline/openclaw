@@ -475,4 +475,49 @@ describe("Agent-specific sandbox config", () => {
     const sandbox = resolveSandboxConfigForAgent(cfg, "main");
     expect(sandbox.tools.allow).toContain("image");
   });
+
+  it("defaults backend to docker when not set in config", async () => {
+    const cfg: OpenClawConfig = {
+      agents: {
+        defaults: {
+          sandbox: { mode: "all", scope: "agent" },
+        },
+      },
+    };
+
+    const sandbox = resolveSandboxConfigForAgent(cfg, "main");
+    expect(sandbox.backend).toBe("docker");
+  });
+
+  it("reads backend from agents.defaults.sandbox.backend", async () => {
+    const cfg: OpenClawConfig = {
+      agents: {
+        defaults: {
+          sandbox: { mode: "all", scope: "agent", backend: "podman" },
+        },
+      },
+    };
+
+    const sandbox = resolveSandboxConfigForAgent(cfg, "main");
+    expect(sandbox.backend).toBe("podman");
+  });
+
+  it("per-agent backend overrides the default", async () => {
+    const cfg: OpenClawConfig = {
+      agents: {
+        defaults: {
+          sandbox: { mode: "all", scope: "agent", backend: "docker" },
+        },
+        list: [
+          {
+            id: "work",
+            sandbox: { backend: "podman" },
+          },
+        ],
+      },
+    };
+
+    const sandbox = resolveSandboxConfigForAgent(cfg, "work");
+    expect(sandbox.backend).toBe("podman");
+  });
 });
