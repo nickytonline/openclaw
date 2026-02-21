@@ -393,31 +393,34 @@ async function runPodmanSetup(runtime: RuntimeEnv): Promise<void> {
   }
 
   // --- Quadlet (optional) ---
-  if (info.systemdAvailable) {
-    const quadletDefault = info.quadletInstalled ? "installed" : "not installed";
-    const installQuadlet = await clackSelect({
-      message: stylePromptMessage(`Quadlet systemd unit (optional, currently ${quadletDefault})`),
-      options: [
-        {
-          value: "skip" as const,
-          label: "Skip",
-          hint: info.quadletInstalled ? "Keep existing Quadlet unit" : "Do not install",
-        },
-        {
-          value: "install" as const,
-          label: "Install",
-          hint: "Install/overwrite rootless Podman user service",
-        },
-      ],
-      initialValue: "skip" as const,
-    });
+  if (!info.systemdAvailable) {
+    clackNote("systemd not detected — Quadlet options shown for remote host setup.", "Quadlet");
+  }
+  const quadletDefault = info.quadletInstalled ? "installed" : "not installed";
+  const installQuadlet = await clackSelect({
+    message: stylePromptMessage(`Quadlet systemd unit (optional, currently ${quadletDefault})`),
+    options: [
+      {
+        value: "skip" as const,
+        label: "Skip",
+        hint: info.quadletInstalled ? "Keep existing Quadlet unit" : "Do not install",
+      },
+      {
+        value: "install" as const,
+        label: "Install",
+        hint: "Install/overwrite rootless Podman user service",
+      },
+    ],
+    initialValue: "skip" as const,
+  });
 
-    if (isCancel(installQuadlet)) {
-      cancel("Cancelled.");
-      return;
-    }
+  if (isCancel(installQuadlet)) {
+    cancel("Cancelled.");
+    return;
+  }
 
-    if (installQuadlet === "install") {
+  if (installQuadlet === "install") {
+    if (isLinux && info.systemdAvailable) {
       try {
         const homeDir = (
           await runExec("bash", ["-c", `echo ~${podmanUser}`], {
@@ -492,6 +495,14 @@ async function runPodmanSetup(runtime: RuntimeEnv): Promise<void> {
       } catch (err) {
         runtime.error(`Failed to install Quadlet unit: ${String(err)}`);
       }
+    } else {
+      runtime.log(`\nOn the target Linux host, create the Quadlet unit:`);
+      runtime.log(`  mkdir -p ~${podmanUser}/.config/containers/systemd`);
+      runtime.log(
+        `  Copy your openclaw.container file to ~${podmanUser}/.config/containers/systemd/openclaw.container`,
+      );
+      runtime.log(`  sudo systemctl --machine=${podmanUser}@ --user daemon-reload`);
+      runtime.log(`  sudo systemctl --machine=${podmanUser}@ --user enable openclaw.service`);
     }
   }
 }
