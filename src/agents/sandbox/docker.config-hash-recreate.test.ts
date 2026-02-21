@@ -85,6 +85,7 @@ vi.mock("node:child_process", async (importOriginal) => {
 
 function createSandboxConfig(dns: string[]): SandboxConfig {
   return {
+    backend: "docker",
     mode: "all",
     scope: "shared",
     workspaceAccess: "rw",
@@ -137,12 +138,14 @@ describe("ensureSandboxContainer config-hash recreation", () => {
     const newCfg = createSandboxConfig(["8.8.8.8", "1.1.1.1"]);
 
     const oldHash = computeSandboxConfigHash({
+      backend: oldCfg.backend,
       docker: oldCfg.docker,
       workspaceAccess: oldCfg.workspaceAccess,
       workspaceDir,
       agentWorkspaceDir: workspaceDir,
     });
     const newHash = computeSandboxConfigHash({
+      backend: newCfg.backend,
       docker: newCfg.docker,
       workspaceAccess: newCfg.workspaceAccess,
       workspaceDir,

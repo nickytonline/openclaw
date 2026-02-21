@@ -46,6 +46,7 @@ vi.mock("../../browser/bridge-server.js", () => ({
 
 function buildConfig(enableNoVnc: boolean): SandboxConfig {
   return {
+    backend: "docker",
     mode: "all",
     scope: "session",
     workspaceAccess: "none",

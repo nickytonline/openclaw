@@ -56,6 +56,7 @@ const ORDER_SENSITIVE_ARRAY_CASES: ReadonlyArray<{
 describe("computeSandboxConfigHash", () => {
   it("ignores object key order", () => {
     const shared = {
+      backend: "docker",
       workspaceAccess: "rw" as const,
       workspaceDir: "/tmp/workspace",
       agentWorkspaceDir: "/tmp/workspace",
@@ -85,6 +86,7 @@ describe("computeSandboxConfigHash", () => {
 
   it.each(ORDER_SENSITIVE_ARRAY_CASES)("treats $field order as significant", (testCase) => {
     const shared = {
+      backend: "docker",
       workspaceAccess: "rw" as const,
       workspaceDir: "/tmp/workspace",
       agentWorkspaceDir: "/tmp/workspace",
@@ -108,6 +110,7 @@ describe("computeSandboxConfigHash", () => {
 describe("computeSandboxBrowserConfigHash", () => {
   it("treats docker bind order as significant", () => {
     const shared = {
+      backend: "docker",
       browser: {
         cdpPort: 9222,
         cdpSourceRange: undefined,
@@ -138,6 +141,7 @@ describe("computeSandboxBrowserConfigHash", () => {
 
   it("changes when security epoch changes", () => {
     const shared = {
+      backend: "docker",
       docker: createDockerConfig(),
       browser: {
         cdpPort: 9222,
@@ -164,6 +168,7 @@ describe("computeSandboxBrowserConfigHash", () => {
 
   it("changes when cdp source range changes", () => {
     const shared = {
+      backend: "docker",
       docker: createDockerConfig(),
       browser: {
         cdpPort: 9222,
