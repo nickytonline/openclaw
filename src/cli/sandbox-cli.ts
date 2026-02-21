@@ -1,4 +1,5 @@
 import type { Command } from "commander";
+import { sandboxBackendCommand } from "../commands/sandbox-backend.js";
 import { sandboxExplainCommand } from "../commands/sandbox-explain.js";
 import { sandboxListCommand, sandboxRecreateCommand } from "../commands/sandbox.js";
 import { defaultRuntime } from "../runtime.js";
@@ -20,6 +21,7 @@ const SANDBOX_EXAMPLES = {
     ["openclaw sandbox recreate --session main", "Recreate a specific session."],
     ["openclaw sandbox recreate --agent mybot", "Recreate agent containers."],
     ["openclaw sandbox explain", "Explain effective sandbox config."],
+    ["openclaw sandbox backend", "Show or switch container backend."],
   ],
   list: [
     ["openclaw sandbox list", "List all sandbox containers."],
@@ -38,6 +40,13 @@ const SANDBOX_EXAMPLES = {
     ["openclaw sandbox explain --session agent:main:main", "Explain a specific session."],
     ["openclaw sandbox explain --agent work", "Explain an agent sandbox."],
     ["openclaw sandbox explain --json", "JSON output."],
+  ],
+  backend: [
+    ["openclaw sandbox backend", "Show current backend and select interactively."],
+    ["openclaw sandbox backend --set podman", "Switch to Podman."],
+    ["openclaw sandbox backend --set docker", "Switch to Docker."],
+    ["openclaw sandbox backend --agent work", "Set backend for a specific agent."],
+    ["openclaw sandbox backend --json", "Output current backend as JSON."],
   ],
 } as const;
 
@@ -86,7 +95,7 @@ export function registerSandboxCli(program: Command) {
         `\n${theme.heading("Examples:")}\n${formatHelpExamples(SANDBOX_EXAMPLES.list)}\n\n${theme.heading(
           "Output includes:",
         )}\n${theme.muted("- Container name and status (running/stopped)")}\n${theme.muted(
-          "- Docker image and whether it matches current config",
+          "- Container image and whether it matches current config",
         )}\n${theme.muted("- Age (time since creation)")}\n${theme.muted(
           "- Idle time (time since last use)",
         )}\n${theme.muted("- Associated session/agent ID")}`,
@@ -119,7 +128,7 @@ export function registerSandboxCli(program: Command) {
         `\n${theme.heading("Examples:")}\n${formatHelpExamples(SANDBOX_EXAMPLES.recreate)}\n\n${theme.heading(
           "Why use this?",
         )}\n${theme.muted(
-          "After updating Docker images or sandbox configuration, existing containers continue running with old settings.",
+          "After updating container images or sandbox configuration, existing containers continue running with old settings.",
         )}\n${theme.muted(
           "This command removes them so they'll be recreated automatically with current config when next needed.",
         )}\n\n${theme.heading("Filter options:")}\n${theme.muted(
@@ -164,6 +173,31 @@ export function registerSandboxCli(program: Command) {
         sandboxExplainCommand(
           {
             session: opts.session as string | undefined,
+            agent: opts.agent as string | undefined,
+            json: Boolean(opts.json),
+          },
+          defaultRuntime,
+        ),
+      ),
+    );
+
+  // --- Backend Command ---
+
+  sandbox
+    .command("backend")
+    .description("Show or change the container backend (docker/podman)")
+    .option("--set <backend>", "Set backend non-interactively (docker or podman)")
+    .option("--agent <id>", "Set backend for a specific agent")
+    .option("--json", "Output current backend as JSON", false)
+    .addHelpText(
+      "after",
+      () => `\n${theme.heading("Examples:")}\n${formatHelpExamples(SANDBOX_EXAMPLES.backend)}\n`,
+    )
+    .action(
+      createRunner((opts) =>
+        sandboxBackendCommand(
+          {
+            set: opts.set as string | undefined,
             agent: opts.agent as string | undefined,
             json: Boolean(opts.json),
           },
