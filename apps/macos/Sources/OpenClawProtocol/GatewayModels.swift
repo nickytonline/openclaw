@@ -296,6 +296,7 @@ public struct Snapshot: Codable, Sendable {
     public let statedir: String?
     public let sessiondefaults: [String: AnyCodable]?
     public let authmode: AnyCodable?
+    public let updateavailable: [String: AnyCodable]?
 
     public init(
         presence: [PresenceEntry],
@@ -305,7 +306,8 @@ public struct Snapshot: Codable, Sendable {
         configpath: String?,
         statedir: String?,
         sessiondefaults: [String: AnyCodable]?,
-        authmode: AnyCodable?
+        authmode: AnyCodable?,
+        updateavailable: [String: AnyCodable]?
     ) {
         self.presence = presence
         self.health = health
@@ -315,6 +317,7 @@ public struct Snapshot: Codable, Sendable {
         self.statedir = statedir
         self.sessiondefaults = sessiondefaults
         self.authmode = authmode
+        self.updateavailable = updateavailable
     }
     private enum CodingKeys: String, CodingKey {
         case presence
@@ -325,6 +328,7 @@ public struct Snapshot: Codable, Sendable {
         case statedir = "stateDir"
         case sessiondefaults = "sessionDefaults"
         case authmode = "authMode"
+        case updateavailable = "updateAvailable"
     }
 }
 
@@ -925,6 +929,68 @@ public struct NodeInvokeRequestEvent: Codable, Sendable {
     }
 }
 
+public struct PushTestParams: Codable, Sendable {
+    public let nodeid: String
+    public let title: String?
+    public let body: String?
+    public let environment: String?
+
+    public init(
+        nodeid: String,
+        title: String?,
+        body: String?,
+        environment: String?
+    ) {
+        self.nodeid = nodeid
+        self.title = title
+        self.body = body
+        self.environment = environment
+    }
+    private enum CodingKeys: String, CodingKey {
+        case nodeid = "nodeId"
+        case title
+        case body
+        case environment
+    }
+}
+
+public struct PushTestResult: Codable, Sendable {
+    public let ok: Bool
+    public let status: Int
+    public let apnsid: String?
+    public let reason: String?
+    public let tokensuffix: String
+    public let topic: String
+    public let environment: String
+
+    public init(
+        ok: Bool,
+        status: Int,
+        apnsid: String?,
+        reason: String?,
+        tokensuffix: String,
+        topic: String,
+        environment: String
+    ) {
+        self.ok = ok
+        self.status = status
+        self.apnsid = apnsid
+        self.reason = reason
+        self.tokensuffix = tokensuffix
+        self.topic = topic
+        self.environment = environment
+    }
+    private enum CodingKeys: String, CodingKey {
+        case ok
+        case status
+        case apnsid = "apnsId"
+        case reason
+        case tokensuffix = "tokenSuffix"
+        case topic
+        case environment
+    }
+}
+
 public struct SessionsListParams: Codable, Sendable {
     public let limit: Int?
     public let activeminutes: Int?
@@ -1125,17 +1191,21 @@ public struct SessionsResetParams: Codable, Sendable {
 public struct SessionsDeleteParams: Codable, Sendable {
     public let key: String
     public let deletetranscript: Bool?
+    public let emitlifecyclehooks: Bool?
 
     public init(
         key: String,
-        deletetranscript: Bool?
+        deletetranscript: Bool?,
+        emitlifecyclehooks: Bool?
     ) {
         self.key = key
         self.deletetranscript = deletetranscript
+        self.emitlifecyclehooks = emitlifecyclehooks
     }
     private enum CodingKeys: String, CodingKey {
         case key
         case deletetranscript = "deleteTranscript"
+        case emitlifecyclehooks = "emitLifecycleHooks"
     }
 }
 
@@ -1160,6 +1230,8 @@ public struct SessionsUsageParams: Codable, Sendable {
     public let key: String?
     public let startdate: String?
     public let enddate: String?
+    public let mode: AnyCodable?
+    public let utcoffset: String?
     public let limit: Int?
     public let includecontextweight: Bool?
 
@@ -1167,12 +1239,16 @@ public struct SessionsUsageParams: Codable, Sendable {
         key: String?,
         startdate: String?,
         enddate: String?,
+        mode: AnyCodable?,
+        utcoffset: String?,
         limit: Int?,
         includecontextweight: Bool?
     ) {
         self.key = key
         self.startdate = startdate
         self.enddate = enddate
+        self.mode = mode
+        self.utcoffset = utcoffset
         self.limit = limit
         self.includecontextweight = includecontextweight
     }
@@ -1180,6 +1256,8 @@ public struct SessionsUsageParams: Codable, Sendable {
         case key
         case startdate = "startDate"
         case enddate = "endDate"
+        case mode
+        case utcoffset = "utcOffset"
         case limit
         case includecontextweight = "includeContextWeight"
     }
