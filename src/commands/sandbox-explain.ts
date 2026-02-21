@@ -235,6 +235,7 @@ export async function sandboxExplainCommand(
     sessionKey,
     mainSessionKey,
     sandbox: {
+      backend: sandboxCfg.backend,
       mode: sandboxCfg.mode,
       scope: sandboxCfg.scope,
       perSession: sandboxCfg.scope === "session",
@@ -280,6 +281,7 @@ export async function sandboxExplainCommand(
   lines.push(`  ${key("agentId:")} ${value(payload.agentId)}`);
   lines.push(`  ${key("sessionKey:")} ${value(payload.sessionKey)}`);
   lines.push(`  ${key("mainSessionKey:")} ${value(payload.mainSessionKey)}`);
+  lines.push(`  ${key("backend:")} ${value(payload.sandbox.backend)}`);
   lines.push(
     `  ${key("runtime:")} ${payload.sandbox.sessionIsSandboxed ? warn("sandboxed") : ok("direct")}`,
   );
