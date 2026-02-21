@@ -27,20 +27,22 @@ async function listSandboxRegistryItems<
   TEntry extends { containerName: string; image: string; sessionKey: string },
 >(params: {
   read: () => Promise<{ entries: TEntry[] }>;
-  resolveConfiguredImage: (agentId?: string) => string;
+  resolveEntryConfig: (agentId?: string) => { configuredImage: string; command: string };
 }): Promise<Array<TEntry & { running: boolean; imageMatch: boolean }>> {
   const registry = await params.read();
   const results: Array<TEntry & { running: boolean; imageMatch: boolean }> = [];
 
   for (const entry of registry.entries) {
-    const state = await dockerContainerState(entry.containerName);
+    const agentId = resolveSandboxAgentId(entry.sessionKey);
+    const { configuredImage, command } = params.resolveEntryConfig(agentId);
+    const state = await dockerContainerState(entry.containerName, command);
     // Get actual image from container.
     let actualImage = entry.image;
     if (state.exists) {
       try {
         const result = await execDocker(
           ["inspect", "-f", "{{.Config.Image}}", entry.containerName],
-          { allowFailure: true },
+          { allowFailure: true, command },
         );
         if (result.code === 0) {
           actualImage = result.stdout.trim();
@@ -49,8 +51,6 @@ async function listSandboxRegistryItems<
         // ignore
       }
     }
-    const agentId = resolveSandboxAgentId(entry.sessionKey);
-    const configuredImage = params.resolveConfiguredImage(agentId);
     results.push({
       ...entry,
       image: actualImage,
@@ -66,7 +66,13 @@ export async function listSandboxContainers(): Promise<SandboxContainerInfo[]> {
   const config = loadConfig();
   return listSandboxRegistryItems<SandboxRegistryEntry>({
     read: readRegistry,
-    resolveConfiguredImage: (agentId) => resolveSandboxConfigForAgent(config, agentId).docker.image,
+    resolveEntryConfig: (agentId) => {
+      const cfg = resolveSandboxConfigForAgent(config, agentId);
+      return {
+        configuredImage: cfg.docker.image,
+        command: cfg.backend === "podman" ? "podman" : "docker",
+      };
+    },
   });
 }
 
@@ -74,14 +80,24 @@ export async function listSandboxBrowsers(): Promise<SandboxBrowserInfo[]> {
   const config = loadConfig();
   return listSandboxRegistryItems<SandboxBrowserRegistryEntry>({
     read: readBrowserRegistry,
-    resolveConfiguredImage: (agentId) =>
-      resolveSandboxConfigForAgent(config, agentId).browser.image,
+    resolveEntryConfig: (agentId) => {
+      const cfg = resolveSandboxConfigForAgent(config, agentId);
+      return {
+        configuredImage: cfg.browser.image,
+        command: cfg.backend === "podman" ? "podman" : "docker",
+      };
+    },
   });
 }
 
 export async function removeSandboxContainer(containerName: string): Promise<void> {
   try {
-    await execDocker(["rm", "-f", containerName], { allowFailure: true });
+    await execDocker(["rm", "-f", containerName], { allowFailure: true, command: "docker" });
+  } catch {
+    // ignore removal failures
+  }
+  try {
+    await execDocker(["rm", "-f", containerName], { allowFailure: true, command: "podman" });
   } catch {
     // ignore removal failures
   }
@@ -90,7 +106,12 @@ export async function removeSandboxContainer(containerName: string): Promise<voi
 
 export async function removeSandboxBrowserContainer(containerName: string): Promise<void> {
   try {
-    await execDocker(["rm", "-f", containerName], { allowFailure: true });
+    await execDocker(["rm", "-f", containerName], { allowFailure: true, command: "docker" });
+  } catch {
+    // ignore removal failures
+  }
+  try {
+    await execDocker(["rm", "-f", containerName], { allowFailure: true, command: "podman" });
   } catch {
     // ignore removal failures
   }

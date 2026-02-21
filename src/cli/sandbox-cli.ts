@@ -59,7 +59,7 @@ function createRunner(
 export function registerSandboxCli(program: Command) {
   const sandbox = program
     .command("sandbox")
-    .description("Manage sandbox containers (Docker-based agent isolation)")
+    .description("Manage sandbox containers (container-based agent isolation)")
     .addHelpText(
       "after",
       () => `\n${theme.heading("Examples:")}\n${formatHelpExamples(SANDBOX_EXAMPLES.main)}\n`,

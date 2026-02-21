@@ -2,6 +2,7 @@ import { hashTextSha256 } from "./hash.js";
 import type { SandboxBrowserConfig, SandboxDockerConfig, SandboxWorkspaceAccess } from "./types.js";
 
 type SandboxHashInput = {
+  backend: string;
   docker: SandboxDockerConfig;
   workspaceAccess: SandboxWorkspaceAccess;
   workspaceDir: string;
@@ -9,6 +10,7 @@ type SandboxHashInput = {
 };
 
 type SandboxBrowserHashInput = {
+  backend: string;
   docker: SandboxDockerConfig;
   browser: Pick<
     SandboxBrowserConfig,

@@ -3,7 +3,45 @@ import { resolveSandboxBrowserConfig } from "../agents/sandbox/config.js";
 import { validateConfigObject } from "./config.js";
 
 describe("sandbox docker config", () => {
-  it("accepts safe binds array in sandbox.docker config", () => {
+  it("accepts sandbox backend selection", () => {
+    const res = validateConfigObject({
+      agents: {
+        defaults: {
+          sandbox: {
+            backend: "podman",
+          },
+        },
+        list: [
+          {
+            id: "main",
+            sandbox: {
+              backend: "docker",
+            },
+          },
+        ],
+      },
+    });
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.config.agents?.defaults?.sandbox?.backend).toBe("podman");
+      expect(res.config.agents?.list?.[0]?.sandbox?.backend).toBe("docker");
+    }
+  });
+
+  it("rejects unknown sandbox backend", () => {
+    const res = validateConfigObject({
+      agents: {
+        defaults: {
+          sandbox: {
+            backend: "rootful",
+          },
+        },
+      },
+    });
+    expect(res.ok).toBe(false);
+  });
+
+  it("accepts binds array in sandbox.docker config", () => {
     const res = validateConfigObject({
       agents: {
         defaults: {

@@ -95,9 +95,10 @@ function buildSandboxBrowserResolvedConfig(params: {
   };
 }
 
-async function ensureSandboxBrowserImage(image: string) {
+async function ensureSandboxBrowserImage(image: string, command?: string) {
   const result = await execDocker(["image", "inspect", image], {
     allowFailure: true,
+    command,
   });
   if (result.code === 0) {
     return;
@@ -142,7 +143,11 @@ export async function ensureSandboxBrowser(params: {
   const slug = params.cfg.scope === "shared" ? "shared" : slugifySessionKey(params.scopeKey);
   const name = `${params.cfg.browser.containerPrefix}${slug}`;
   const containerName = name.slice(0, 63);
-  const state = await dockerContainerState(containerName);
+  const command = params.cfg.backend === "podman" ? "podman" : "docker";
+  if (params.cfg.backend !== "docker" && params.cfg.backend !== "podman") {
+    throw new Error(`Unsupported sandbox backend: ${String(params.cfg.backend)}`);
+  }
+  const state = await dockerContainerState(containerName, command);
   const browserImage = params.cfg.browser.image ?? DEFAULT_SANDBOX_BROWSER_IMAGE;
   const cdpSourceRange = params.cfg.browser.cdpSourceRange?.trim() || undefined;
   const browserDockerCfg = resolveSandboxBrowserDockerCreateConfig({
@@ -150,6 +155,7 @@ export async function ensureSandboxBrowser(params: {
     browser: { ...params.cfg.browser, image: browserImage },
   });
   const expectedHash = computeSandboxBrowserConfigHash({
+    backend: params.cfg.backend,
     docker: browserDockerCfg,
     browser: {
       cdpPort: params.cfg.browser.cdpPort,
@@ -180,7 +186,7 @@ export async function ensureSandboxBrowser(params: {
     }
     const registry = await readBrowserRegistry();
     const registryEntry = registry.entries.find((entry) => entry.containerName === containerName);
-    currentHash = await readDockerContainerLabel(containerName, "openclaw.configHash");
+    currentHash = await readDockerContainerLabel(containerName, "openclaw.configHash", command);
     hashMismatch = !currentHash || currentHash !== expectedHash;
     if (!currentHash) {
       currentHash = registryEntry?.configHash ?? null;
@@ -205,7 +211,7 @@ export async function ensureSandboxBrowser(params: {
           `Sandbox browser config changed for ${containerName} (recently used). Recreate to apply: ${hint}`,
         );
       } else {
-        await execDocker(["rm", "-f", containerName], { allowFailure: true });
+        await execDocker(["rm", "-f", containerName], { allowFailure: true, command });
         hasContainer = false;
         running = false;
       }
@@ -217,7 +223,7 @@ export async function ensureSandboxBrowser(params: {
       noVncPassword = generateNoVncPassword();
     }
     await ensureDockerNetwork(browserDockerCfg.network);
-    await ensureSandboxBrowserImage(browserImage);
+    await ensureSandboxBrowserImage(browserImage, command);
     const args = buildSandboxCreateArgs({
       name: containerName,
       cfg: browserDockerCfg,
@@ -256,19 +262,19 @@ export async function ensureSandboxBrowser(params: {
       args.push("-e", `${NOVNC_PASSWORD_ENV_KEY}=${noVncPassword}`);
     }
     args.push(browserImage);
-    await execDocker(args);
-    await execDocker(["start", containerName]);
+    await execDocker(args, { command });
+    await execDocker(["start", containerName], { command });
   } else if (!running) {
-    await execDocker(["start", containerName]);
+    await execDocker(["start", containerName], { command });
   }
 
-  const mappedCdp = await readDockerPort(containerName, params.cfg.browser.cdpPort);
+  const mappedCdp = await readDockerPort(containerName, params.cfg.browser.cdpPort, command);
   if (!mappedCdp) {
     throw new Error(`Failed to resolve CDP port mapping for ${containerName}.`);
   }
 
   const mappedNoVnc = noVncEnabled
-    ? await readDockerPort(containerName, params.cfg.browser.noVncPort)
+    ? await readDockerPort(containerName, params.cfg.browser.noVncPort, command)
     : null;
   if (noVncEnabled && !noVncPassword) {
     noVncPassword =
@@ -321,9 +327,9 @@ export async function ensureSandboxBrowser(params: {
 
     const onEnsureAttachTarget = params.cfg.browser.autoStart
       ? async () => {
-          const state = await dockerContainerState(containerName);
+          const state = await dockerContainerState(containerName, command);
           if (state.exists && !state.running) {
-            await execDocker(["start", containerName]);
+            await execDocker(["start", containerName], { command });
           }
           const ok = await waitForSandboxCdp({
             cdpPort: mappedCdp,

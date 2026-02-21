@@ -145,6 +145,7 @@ export async function resolveSandboxContext(params: {
     workspaceAccess: cfg.workspaceAccess,
     containerName,
     containerWorkdir: cfg.docker.workdir,
+    backend: cfg.backend,
     docker: cfg.docker,
     tools: cfg.tools,
     browserAllowHostControl: cfg.browser.allowHostControl,

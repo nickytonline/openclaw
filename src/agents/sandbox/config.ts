@@ -169,6 +169,7 @@ export function resolveSandboxConfigForAgent(
   return {
     mode: agentSandbox?.mode ?? agent?.mode ?? "off",
     scope,
+    backend: agentSandbox?.backend ?? agent?.backend ?? "docker",
     workspaceAccess: agentSandbox?.workspaceAccess ?? agent?.workspaceAccess ?? "none",
     workspaceRoot:
       agentSandbox?.workspaceRoot ?? agent?.workspaceRoot ?? DEFAULT_SANDBOX_WORKSPACE_ROOT,

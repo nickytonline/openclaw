@@ -208,7 +208,18 @@ class SandboxFsBridgeImpl implements SandboxFsBridge {
       input: options.stdin,
       allowFailure: options.allowFailure,
       signal: options.signal,
+      command: this.resolveCommand(),
     });
+  }
+
+  private resolveCommand() {
+    if (this.sandbox.backend === "podman") {
+      return "podman";
+    }
+    if (this.sandbox.backend && this.sandbox.backend !== "docker") {
+      throw new Error(`Unsupported sandbox backend: ${String(this.sandbox.backend)}`);
+    }
+    return "docker";
   }
 
   private ensureWriteAccess(target: SandboxResolvedFsPath, action: string) {

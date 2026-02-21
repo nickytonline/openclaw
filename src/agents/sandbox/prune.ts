@@ -43,6 +43,7 @@ async function pruneSandboxRegistryEntries<TEntry extends PruneableRegistryEntry
   if (params.cfg.prune.idleHours === 0 && params.cfg.prune.maxAgeDays === 0) {
     return;
   }
+  const command = params.cfg.backend === "podman" ? "podman" : "docker";
   const registry = await params.read();
   for (const entry of registry.entries) {
     if (!shouldPruneSandboxEntry(params.cfg, now, entry)) {
@@ -51,6 +52,7 @@ async function pruneSandboxRegistryEntries<TEntry extends PruneableRegistryEntry
     try {
       await execDocker(["rm", "-f", entry.containerName], {
         allowFailure: true,
+        command,
       });
     } catch {
       // ignore prune failures
@@ -104,9 +106,12 @@ export async function maybePruneSandboxes(cfg: SandboxConfig) {
   }
 }
 
-export async function ensureDockerContainerIsRunning(containerName: string) {
-  const state = await dockerContainerState(containerName);
+export async function ensureDockerContainerIsRunning(
+  containerName: string,
+  command: "docker" | "podman" = "docker",
+) {
+  const state = await dockerContainerState(containerName, command);
   if (state.exists && !state.running) {
-    await execDocker(["start", containerName]);
+    await execDocker(["start", containerName], { command });
   }
 }

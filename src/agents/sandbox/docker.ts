@@ -28,10 +28,10 @@ function createAbortError(): Error {
 
 export function execDockerRaw(
   args: string[],
-  opts?: ExecDockerRawOptions,
+  opts?: ExecDockerRawOptions & { command?: string },
 ): Promise<ExecDockerRawResult> {
   return new Promise<ExecDockerRawResult>((resolve, reject) => {
-    const child = spawn("docker", args, {
+    const child = spawn(opts?.command ?? "docker", args, {
       stdio: ["pipe", "pipe", "pipe"],
     });
     const stdoutChunks: Buffer[] = [];
@@ -119,7 +119,7 @@ const log = createSubsystemLogger("docker");
 
 const HOT_CONTAINER_WINDOW_MS = 5 * 60 * 1000;
 
-export type ExecDockerOptions = ExecDockerRawOptions;
+export type ExecDockerOptions = ExecDockerRawOptions & { command?: string };
 
 export async function execDocker(args: string[], opts?: ExecDockerOptions) {
   const result = await execDockerRaw(args, opts);
@@ -133,10 +133,11 @@ export async function execDocker(args: string[], opts?: ExecDockerOptions) {
 export async function readDockerContainerLabel(
   containerName: string,
   label: string,
+  command?: string,
 ): Promise<string | null> {
   const result = await execDocker(
     ["inspect", "-f", `{{ index .Config.Labels "${label}" }}`, containerName],
-    { allowFailure: true },
+    { allowFailure: true, command },
   );
   if (result.code !== 0) {
     return null;
@@ -167,9 +168,10 @@ export async function readDockerContainerEnvVar(
   return null;
 }
 
-export async function readDockerPort(containerName: string, port: number) {
+export async function readDockerPort(containerName: string, port: number, command?: string) {
   const result = await execDocker(["port", containerName, `${port}/tcp`], {
     allowFailure: true,
+    command,
   });
   if (result.code !== 0) {
     return null;
@@ -183,9 +185,10 @@ export async function readDockerPort(containerName: string, port: number) {
   return Number.isFinite(mapped) ? mapped : null;
 }
 
-async function dockerImageExists(image: string) {
+async function dockerImageExists(image: string, command?: string) {
   const result = await execDocker(["image", "inspect", image], {
     allowFailure: true,
+    command,
   });
   if (result.code === 0) {
     return true;
@@ -197,22 +200,23 @@ async function dockerImageExists(image: string) {
   throw new Error(`Failed to inspect sandbox image: ${stderr}`);
 }
 
-export async function ensureDockerImage(image: string) {
-  const exists = await dockerImageExists(image);
+export async function ensureDockerImage(image: string, command?: string) {
+  const exists = await dockerImageExists(image, command);
   if (exists) {
     return;
   }
   if (image === DEFAULT_SANDBOX_IMAGE) {
-    await execDocker(["pull", "debian:bookworm-slim"]);
-    await execDocker(["tag", "debian:bookworm-slim", DEFAULT_SANDBOX_IMAGE]);
+    await execDocker(["pull", "debian:bookworm-slim"], { command });
+    await execDocker(["tag", "debian:bookworm-slim", DEFAULT_SANDBOX_IMAGE], { command });
     return;
   }
   throw new Error(`Sandbox image not found: ${image}. Build or pull it first.`);
 }
 
-export async function dockerContainerState(name: string) {
+export async function dockerContainerState(name: string, command?: string) {
   const result = await execDocker(["inspect", "-f", "{{.State.Running}}", name], {
     allowFailure: true,
+    command,
   });
   if (result.code !== 0) {
     return { exists: false, running: false };
@@ -358,9 +362,10 @@ async function createSandboxContainer(params: {
   agentWorkspaceDir: string;
   scopeKey: string;
   configHash?: string;
+  command?: string;
 }) {
   const { name, cfg, workspaceDir, scopeKey } = params;
-  await ensureDockerImage(cfg.image);
+  await ensureDockerImage(cfg.image, params.command);
 
   const args = buildSandboxCreateArgs({
     name,
@@ -381,16 +386,21 @@ async function createSandboxContainer(params: {
   }
   args.push(cfg.image, "sleep", "infinity");
 
-  await execDocker(args);
-  await execDocker(["start", name]);
+  await execDocker(args, { command: params.command });
+  await execDocker(["start", name], { command: params.command });
 
   if (cfg.setupCommand?.trim()) {
-    await execDocker(["exec", "-i", name, "sh", "-lc", cfg.setupCommand]);
+    await execDocker(["exec", "-i", name, "sh", "-lc", cfg.setupCommand], {
+      command: params.command,
+    });
   }
 }
 
-async function readContainerConfigHash(containerName: string): Promise<string | null> {
-  return await readDockerContainerLabel(containerName, "openclaw.configHash");
+async function readContainerConfigHash(
+  containerName: string,
+  command?: string,
+): Promise<string | null> {
+  return await readDockerContainerLabel(containerName, "openclaw.configHash", command);
 }
 
 function formatSandboxRecreateHint(params: { scope: SandboxConfig["scope"]; sessionKey: string }) {
@@ -415,13 +425,18 @@ export async function ensureSandboxContainer(params: {
   const name = `${params.cfg.docker.containerPrefix}${slug}`;
   const containerName = name.slice(0, 63);
   const expectedHash = computeSandboxConfigHash({
+    backend: params.cfg.backend,
     docker: params.cfg.docker,
     workspaceAccess: params.cfg.workspaceAccess,
     workspaceDir: params.workspaceDir,
     agentWorkspaceDir: params.agentWorkspaceDir,
   });
   const now = Date.now();
-  const state = await dockerContainerState(containerName);
+  const command = params.cfg.backend === "podman" ? "podman" : "docker";
+  if (params.cfg.backend !== "docker" && params.cfg.backend !== "podman") {
+    throw new Error(`Unsupported sandbox backend: ${String(params.cfg.backend)}`);
+  }
+  const state = await dockerContainerState(containerName, command);
   let hasContainer = state.exists;
   let running = state.running;
   let currentHash: string | null = null;
@@ -435,7 +450,7 @@ export async function ensureSandboxContainer(params: {
   if (hasContainer) {
     const registry = await readRegistry();
     registryEntry = registry.entries.find((entry) => entry.containerName === containerName);
-    currentHash = await readContainerConfigHash(containerName);
+    currentHash = await readContainerConfigHash(containerName, command);
     if (!currentHash) {
       currentHash = registryEntry?.configHash ?? null;
     }
@@ -451,7 +466,7 @@ export async function ensureSandboxContainer(params: {
           `Sandbox config changed for ${containerName} (recently used). Recreate to apply: ${hint}`,
         );
       } else {
-        await execDocker(["rm", "-f", containerName], { allowFailure: true });
+        await execDocker(["rm", "-f", containerName], { allowFailure: true, command });
         hasContainer = false;
         running = false;
       }
@@ -466,9 +481,10 @@ export async function ensureSandboxContainer(params: {
       agentWorkspaceDir: params.agentWorkspaceDir,
       scopeKey,
       configHash: expectedHash,
+      command,
     });
   } else if (!running) {
-    await execDocker(["start", containerName]);
+    await execDocker(["start", containerName], { command });
   }
   await updateRegistry({
     containerName,

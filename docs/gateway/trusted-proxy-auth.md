@@ -12,7 +12,7 @@ read_when:
 
 ## When to Use
 
-Use `trusted-proxy` auth mode when:
+Use `trusted-proxy` authx mode when:
 
 - You run OpenClaw behind an **identity-aware proxy** (Pomerium, Caddy + OAuth, nginx + oauth2-proxy, Traefik + forward auth)
 - Your proxy handles all authentication and passes user identity via headers

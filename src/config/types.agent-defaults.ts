@@ -257,6 +257,12 @@ export type AgentDefaultsConfig = {
     /** Enable sandboxing for sessions. */
     mode?: "off" | "non-main" | "all";
     /**
+     * Container backend to use for sandboxing (default: "docker").
+     * - "docker": Use Docker daemon
+     * - "podman": Use Podman (Linux only, daemonless)
+     */
+    backend?: "docker" | "podman";
+    /**
      * Agent workspace access inside the sandbox.
      * - "none": do not mount the agent workspace into the container; use a sandbox workspace under workspaceRoot
      * - "ro": mount the agent workspace read-only; disables write/edit tools

@@ -52,9 +52,12 @@ export type SandboxPruneConfig = {
 
 export type SandboxScope = "session" | "agent" | "shared";
 
+export type SandboxBackend = "docker" | "podman";
+
 export type SandboxConfig = {
   mode: "off" | "non-main" | "all";
   scope: SandboxScope;
+  backend: SandboxBackend;
   workspaceAccess: SandboxWorkspaceAccess;
   workspaceRoot: string;
   docker: SandboxDockerConfig;
@@ -77,6 +80,7 @@ export type SandboxContext = {
   workspaceAccess: SandboxWorkspaceAccess;
   containerName: string;
   containerWorkdir: string;
+  backend: SandboxBackend;
   docker: SandboxDockerConfig;
   tools: SandboxToolPolicy;
   browserAllowHostControl: boolean;

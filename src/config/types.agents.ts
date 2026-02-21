@@ -42,6 +42,12 @@ export type AgentConfig = {
   };
   sandbox?: {
     mode?: "off" | "non-main" | "all";
+    /**
+     * Container backend to use for sandboxing (default: "docker").
+     * - "docker": Use Docker daemon
+     * - "podman": Use Podman (Linux only, daemonless)
+     */
+    backend?: "docker" | "podman";
     /** Agent workspace access inside the sandbox. */
     workspaceAccess?: "none" | "ro" | "rw";
     /**
