@@ -524,6 +524,51 @@ Default slash command settings:
 ## Feature details
 
 <AccordionGroup>
+  <Accordion title="Edited messages">
+    By default OpenClaw only reacts to `MESSAGE_CREATE` events. If you want
+    the agent to re-process a message when the user edits it, opt in per
+    account:
+
+```json5
+{
+  channels: {
+    discord: {
+      accounts: [
+        {
+          accountId: "default",
+          token: "...",
+          // Re-run the agent on MESSAGE_UPDATE events for this account.
+          handleEdits: true,
+          // Optional: coalesce rapid successive edits into one re-run.
+          // Defaults to 2000 ms; set to 0 to disable the debounce.
+          editDebounceMs: 2000,
+        },
+      ],
+    },
+  },
+}
+```
+
+    When `handleEdits` is true the monitor:
+
+    - subscribes to Discord `MESSAGE_UPDATE` events,
+    - ignores updates Discord sends for non-edit reasons (embed link
+      unfurls, pin changes, component or flag updates) by requiring a
+      fresh `edited_timestamp`,
+    - ignores edits authored by the bot itself,
+    - deduplicates repeat deliveries of the same edited version via an
+      edit-aware replay key (scoped to the edit timestamp, so the next
+      real edit re-claims cleanly), and
+    - coalesces rapid keystrokes on the same message into one agent run
+      using `editDebounceMs`.
+
+    The replayed run enters the same per-session queue as the original
+    create, so ordering and ack reaction semantics stay consistent. This
+    ships as Phase 1 of edit handling; mid-stream cancellation of an
+    in-flight run when a new edit arrives is planned separately.
+
+  </Accordion>
+
   <Accordion title="Reply tags and native replies">
     Discord supports reply tags in agent output:
 

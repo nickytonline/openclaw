@@ -1,5 +1,5 @@
 import { createClaimableDedupe, type ClaimableDedupe } from "openclaw/plugin-sdk/persistent-dedupe";
-import type { DiscordMessageEvent } from "./listeners.js";
+import type { DiscordMessageEvent, DiscordMessageUpdateEvent } from "./listeners.js";
 import { resolveDiscordMessageChannelId } from "./message-utils.js";
 
 const RECENT_DISCORD_MESSAGE_TTL_MS = 5 * 60_000;
@@ -35,6 +35,47 @@ export function buildDiscordInboundReplayKey(params: {
     return null;
   }
   return `${params.accountId}:${channelId}:${messageId}`;
+}
+
+export function buildDiscordEditedInboundReplayKey(params: {
+  accountId: string;
+  data: DiscordMessageUpdateEvent;
+}): string | null {
+  const messageId = params.data.message?.id?.trim();
+  if (!messageId) {
+    return null;
+  }
+  const channelId = resolveDiscordMessageChannelId({
+    message: params.data.message,
+    eventChannelId: params.data.channel_id,
+  });
+  if (!channelId) {
+    return null;
+  }
+  const editedTimestamp = resolveDiscordEditedTimestamp(params.data);
+  const editToken = editedTimestamp ?? "unknown";
+  return `${params.accountId}:${channelId}:${messageId}:edit:${editToken}`;
+}
+
+export function resolveDiscordEditedTimestamp(data: DiscordMessageUpdateEvent): string | null {
+  const message = data.message as
+    | {
+        edited_timestamp?: unknown;
+        editedTimestamp?: unknown;
+      }
+    | null
+    | undefined;
+  const raw =
+    typeof message?.edited_timestamp === "string"
+      ? message.edited_timestamp
+      : typeof message?.editedTimestamp === "string"
+        ? message.editedTimestamp
+        : null;
+  if (!raw) {
+    return null;
+  }
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 export async function claimDiscordInboundReplay(params: {

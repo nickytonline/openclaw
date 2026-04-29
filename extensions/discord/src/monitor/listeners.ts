@@ -18,6 +18,7 @@ import {
   MessageCreateListener,
   MessageReactionAddListener,
   MessageReactionRemoveListener,
+  MessageUpdateListener,
   PresenceUpdateListener,
   ThreadUpdateListener,
   type User,
@@ -44,10 +45,17 @@ type RuntimeEnv = import("openclaw/plugin-sdk/runtime-env").RuntimeEnv;
 type Logger = ReturnType<typeof import("openclaw/plugin-sdk/runtime-env").createSubsystemLogger>;
 
 export type DiscordMessageEvent = Parameters<MessageCreateListener["handle"]>[0];
+export type DiscordMessageUpdateEvent = Parameters<MessageUpdateListener["handle"]>[0];
 export type DiscordInteractionEvent = Parameters<InteractionCreateListener["handle"]>[0];
 
 export type DiscordMessageHandler = (
   data: DiscordMessageEvent,
+  client: Client,
+  options?: { abortSignal?: AbortSignal },
+) => Promise<void>;
+
+export type DiscordMessageUpdateHandler = (
+  data: DiscordMessageUpdateEvent,
   client: Client,
   options?: { abortSignal?: AbortSignal },
 ) => Promise<void>;
@@ -190,6 +198,30 @@ export class DiscordMessageListener extends MessageCreateListener {
       .catch((err) => {
         const logger = this.logger ?? discordEventQueueLog;
         logger.error(danger(`discord handler failed: ${String(err)}`));
+      });
+  }
+}
+
+export class DiscordMessageUpdateListener extends MessageUpdateListener {
+  constructor(
+    private handler: DiscordMessageUpdateHandler,
+    private logger?: Logger,
+    private onEvent?: () => void,
+  ) {
+    super();
+  }
+
+  async handle(data: DiscordMessageUpdateEvent, client: Client) {
+    this.onEvent?.();
+    // Fire-and-forget: hand off to the edit handler without blocking Carbon.
+    // The edit handler owns its own per-message debounce and shares the run
+    // queue with the create handler, so ordering is preserved at the queue
+    // level rather than on this listener.
+    void Promise.resolve()
+      .then(() => this.handler(data, client))
+      .catch((err) => {
+        const logger = this.logger ?? discordEventQueueLog;
+        logger.error(danger(`discord update handler failed: ${String(err)}`));
       });
   }
 }

@@ -1,20 +1,28 @@
 import {
   createChannelInboundDebouncer,
+  createInboundDebouncer,
   shouldDebounceTextInbound,
 } from "openclaw/plugin-sdk/channel-inbound";
 import { danger } from "openclaw/plugin-sdk/runtime-env";
 import { resolveOpenProviderRuntimeGroupPolicy } from "openclaw/plugin-sdk/runtime-group-policy";
 import type { Client } from "../internal/discord.js";
 import {
+  buildDiscordEditedInboundReplayKey,
   buildDiscordInboundReplayKey,
   claimDiscordInboundReplay,
   commitDiscordInboundReplay,
   createDiscordInboundReplayGuard,
   DiscordRetryableInboundError,
   releaseDiscordInboundReplay,
+  resolveDiscordEditedTimestamp,
 } from "./inbound-dedupe.js";
 import { buildDiscordInboundJob } from "./inbound-job.js";
-import type { DiscordMessageEvent, DiscordMessageHandler } from "./listeners.js";
+import type {
+  DiscordMessageEvent,
+  DiscordMessageHandler,
+  DiscordMessageUpdateEvent,
+  DiscordMessageUpdateHandler,
+} from "./listeners.js";
 import { applyImplicitReplyBatchGate } from "./message-handler.batch-gate.js";
 import type { DiscordMessagePreflightParams } from "./message-handler.preflight.types.js";
 import {
@@ -55,7 +63,10 @@ async function loadMessagePreflightRuntime() {
 
 export type DiscordMessageHandlerWithLifecycle = DiscordMessageHandler & {
   deactivate: () => void;
+  handleEdit?: DiscordMessageUpdateHandler;
 };
+
+const DEFAULT_DISCORD_EDIT_DEBOUNCE_MS = 2000;
 
 function isNonEmptyString(value: string | undefined): value is string {
   return typeof value === "string" && value.length > 0;
@@ -270,5 +281,183 @@ export function createDiscordMessageHandler(
 
   handler.deactivate = messageRunQueue.deactivate;
 
+  const handleEditsEnabled = params.discordConfig?.handleEdits === true;
+  if (handleEditsEnabled) {
+    const editDebouncer = createDiscordEditDebouncer({
+      ...params,
+      ackReactionScope,
+      groupPolicy,
+      replayGuard,
+      messageRunQueue,
+      preflightDiscordMessageImpl,
+    });
+    handler.handleEdit = async (data, client, options) => {
+      try {
+        if (options?.abortSignal?.aborted) {
+          return;
+        }
+        if (!shouldProcessDiscordEdit({ data, botUserId: params.botUserId })) {
+          return;
+        }
+        const replayKey = buildDiscordEditedInboundReplayKey({
+          accountId: params.accountId,
+          data,
+        });
+        if (
+          !(await claimDiscordInboundReplay({
+            replayKey,
+            replayGuard,
+          }))
+        ) {
+          return;
+        }
+        await editDebouncer.enqueue({
+          data,
+          client,
+          abortSignal: options?.abortSignal,
+          replayKey: replayKey ?? undefined,
+        });
+      } catch (err) {
+        params.runtime.error?.(danger(`edit handler failed: ${String(err)}`));
+      }
+    };
+  }
+
   return handler;
+}
+
+function shouldProcessDiscordEdit(params: {
+  data: DiscordMessageUpdateEvent;
+  botUserId?: string;
+}): boolean {
+  const message = params.data.message as
+    | {
+        id?: string;
+        author?: { id?: string; bot?: boolean };
+        content?: unknown;
+      }
+    | null
+    | undefined;
+  if (!message?.id) {
+    return false;
+  }
+  // Drop update events that do not include an edited_timestamp. Discord
+  // dispatches MESSAGE_UPDATE for many non-edit reasons (embed link
+  // unfurls, pin changes, component/flag updates) and those events don't
+  // set edited_timestamp, so this cleanly filters them out without
+  // re-running the agent on spurious server-side updates.
+  if (!resolveDiscordEditedTimestamp(params.data)) {
+    return false;
+  }
+  if (typeof message.content !== "string") {
+    return false;
+  }
+  const authorId = message.author?.id ?? params.data.author?.id;
+  if (params.botUserId && authorId === params.botUserId) {
+    return false;
+  }
+  return true;
+}
+
+type DiscordEditDebounceEntry = {
+  data: DiscordMessageUpdateEvent;
+  client: Client;
+  abortSignal?: AbortSignal;
+  replayKey?: string;
+};
+
+function createDiscordEditDebouncer(
+  params: Omit<
+    DiscordMessagePreflightParams,
+    "ackReactionScope" | "groupPolicy" | "data" | "client"
+  > & {
+    ackReactionScope: DiscordMessagePreflightParams["ackReactionScope"];
+    groupPolicy: DiscordMessagePreflightParams["groupPolicy"];
+    replayGuard: ReturnType<typeof createDiscordInboundReplayGuard>;
+    messageRunQueue: ReturnType<typeof createDiscordMessageRunQueue>;
+    preflightDiscordMessageImpl?: PreflightDiscordMessage;
+  },
+) {
+  const resolvedEditDebounceMs =
+    typeof params.discordConfig?.editDebounceMs === "number" &&
+    Number.isFinite(params.discordConfig.editDebounceMs)
+      ? Math.max(0, Math.trunc(params.discordConfig.editDebounceMs))
+      : DEFAULT_DISCORD_EDIT_DEBOUNCE_MS;
+
+  return createInboundDebouncer<DiscordEditDebounceEntry>({
+    debounceMs: resolvedEditDebounceMs,
+    buildKey: (entry) => {
+      const messageId = entry.data.message?.id;
+      if (!messageId) {
+        return null;
+      }
+      const channelId = resolveDiscordMessageChannelId({
+        message: entry.data.message,
+        eventChannelId: entry.data.channel_id,
+      });
+      if (!channelId) {
+        return null;
+      }
+      // Per-message key: rapid successive edits to the same message coalesce
+      // into one preflight + run queue enqueue. Different messages run in
+      // parallel.
+      return `discord:edit:${params.accountId}:${channelId}:${messageId}`;
+    },
+    onFlush: async (entries) => {
+      const last = entries.at(-1);
+      if (!last) {
+        return;
+      }
+      const replayKeys = entries.map((entry) => entry.replayKey).filter(isNonEmptyString);
+      const abortSignal = last.abortSignal;
+      if (abortSignal?.aborted) {
+        releaseDiscordInboundReplay({
+          replayKeys,
+          error: abortSignal.reason,
+          replayGuard: params.replayGuard,
+        });
+        return;
+      }
+      try {
+        const preflight =
+          params.preflightDiscordMessageImpl ??
+          (await loadMessagePreflightRuntime()).preflightDiscordMessage;
+        const ctx = await preflight({
+          ...params,
+          abortSignal,
+          // The update event shape is a structural superset of what
+          // preflight reads, so we coerce at the boundary rather than
+          // carrying a second preflight contract for edits.
+          data: last.data as unknown as DiscordMessageEvent,
+          client: last.client,
+        });
+        if (!ctx) {
+          await commitDiscordInboundReplay({
+            replayKeys,
+            replayGuard: params.replayGuard,
+          });
+          return;
+        }
+        applyImplicitReplyBatchGate(ctx, params.replyToMode, false);
+        params.messageRunQueue.enqueue(buildDiscordInboundJob(ctx, { replayKeys }));
+      } catch (error) {
+        if (error instanceof DiscordRetryableInboundError) {
+          releaseDiscordInboundReplay({
+            replayKeys,
+            error,
+            replayGuard: params.replayGuard,
+          });
+        } else {
+          await commitDiscordInboundReplay({
+            replayKeys,
+            replayGuard: params.replayGuard,
+          });
+        }
+        throw error;
+      }
+    },
+    onError: (err) => {
+      params.runtime.error?.(danger(`discord edit debounce flush failed: ${String(err)}`));
+    },
+  });
 }

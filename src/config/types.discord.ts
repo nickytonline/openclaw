@@ -304,6 +304,19 @@ export type DiscordAccountConfig = {
   heartbeat?: ChannelHeartbeatVisibilityConfig;
   /** Channel health monitor overrides for this channel/account. */
   healthMonitor?: ChannelHealthMonitorConfig;
+  /**
+   * Re-process inbound messages when users edit them (Discord MESSAGE_UPDATE).
+   * When false, edits are ignored. When true, the Discord monitor subscribes
+   * to MESSAGE_UPDATE events and schedules a new agent turn per edit, after
+   * a small per-message debounce to coalesce rapid keystrokes. Default: false.
+   */
+  handleEdits?: boolean;
+  /**
+   * Debounce window (ms) applied per edited message before re-triggering the
+   * agent. Used only when `handleEdits` is true. Higher values coalesce more
+   * rapid edits into a single re-run; zero disables the debounce. Default: 2000.
+   */
+  editDebounceMs?: number;
   /** Exec approval forwarding configuration. */
   execApprovals?: DiscordExecApprovalConfig;
   /** Agent-controlled interactive components (buttons, select menus). */

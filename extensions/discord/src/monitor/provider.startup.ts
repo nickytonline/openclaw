@@ -24,13 +24,15 @@ import {
 } from "./gateway-plugin.js";
 import { createDiscordGatewaySupervisor } from "./gateway-supervisor.js";
 import {
-  DiscordMessageListener,
   DiscordInteractionListener,
+  DiscordMessageListener,
+  DiscordMessageUpdateListener,
   DiscordPresenceListener,
   DiscordReactionListener,
   DiscordReactionRemoveListener,
   DiscordThreadUpdateListener,
   registerDiscordListener,
+  type DiscordMessageUpdateHandler,
 } from "./listeners.js";
 import { resolveDiscordPresenceUpdate } from "./presence.js";
 
@@ -241,6 +243,7 @@ export function registerDiscordMonitorListeners(params: {
   guildEntries?: Record<string, DiscordGuildEntryResolved>;
   logger: NonNullable<ConstructorParameters<typeof DiscordMessageListener>[1]>;
   messageHandler: ConstructorParameters<typeof DiscordMessageListener>[0];
+  messageUpdateHandler?: DiscordMessageUpdateHandler;
   trackInboundEvent?: () => void;
 }) {
   registerDiscordListener(
@@ -251,6 +254,16 @@ export function registerDiscordMonitorListeners(params: {
     params.client.listeners,
     new DiscordMessageListener(params.messageHandler, params.logger, params.trackInboundEvent),
   );
+  if (params.messageUpdateHandler) {
+    registerDiscordListener(
+      params.client.listeners,
+      new DiscordMessageUpdateListener(
+        params.messageUpdateHandler,
+        params.logger,
+        params.trackInboundEvent,
+      ),
+    );
+  }
 
   const reactionListenerOptions: ConstructorParameters<typeof DiscordReactionListener>[0] = {
     cfg: params.cfg,

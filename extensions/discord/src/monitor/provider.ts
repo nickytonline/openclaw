@@ -566,6 +566,7 @@ export async function monitorDiscordProvider(opts: MonitorDiscordOpts = {}) {
       guildEntries,
       logger,
       messageHandler,
+      messageUpdateHandler: messageHandler.handleEdit,
       trackInboundEvent,
     });
 

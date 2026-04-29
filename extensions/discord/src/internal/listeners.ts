@@ -50,6 +50,11 @@ export abstract class MessageCreateListener extends BaseListener {
   abstract override handle(data: DiscordMessageDispatchData, client: Client): Promise<void> | void;
 }
 
+export abstract class MessageUpdateListener extends BaseListener {
+  readonly type = GatewayDispatchEvents.MessageUpdate;
+  abstract override handle(data: DiscordMessageDispatchData, client: Client): Promise<void> | void;
+}
+
 export abstract class InteractionCreateListener extends BaseListener {
   readonly type = GatewayDispatchEvents.InteractionCreate;
 }

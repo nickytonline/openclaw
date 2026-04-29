@@ -1,3 +1,4 @@
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-types";
 import { describe, expect, it, vi } from "vitest";
 import { DiscordRetryableInboundError } from "./inbound-dedupe.js";
 import {
@@ -464,6 +465,14 @@ describe("createDiscordMessageHandler queue behavior", () => {
     expect(processedMessageIds).toEqual(["m-1", "m-2"]);
   });
 
+  it("does not expose an edit handler when handleEdits is not configured", () => {
+    preflightDiscordMessageMock.mockReset();
+    processDiscordMessageMock.mockReset();
+
+    const handler = createDiscordMessageHandler(createDiscordHandlerParams());
+    expect(handler.handleEdit).toBeUndefined();
+  });
+
   it("recovers queue progress after a run failure without leaving busy state stuck", async () => {
     preflightDiscordMessageMock.mockReset();
     processDiscordMessageMock.mockReset();
@@ -492,5 +501,247 @@ describe("createDiscordMessageHandler queue behavior", () => {
     await flushQueueWork();
     expect(processDiscordMessageMock).toHaveBeenCalledTimes(2);
     expect(setStatus).toHaveBeenCalledWith(expect.objectContaining({ activeRuns: 0, busy: false }));
+  });
+});
+
+describe("createDiscordMessageHandler edit behavior", () => {
+  const createEditParams = (overrides?: { editDebounceMs?: number }) => {
+    const base = createDiscordHandlerParams();
+    const discordCfg = {
+      ...base.discordConfig,
+      handleEdits: true,
+      editDebounceMs: overrides?.editDebounceMs ?? 0,
+    } as OpenClawConfig["channels"] extends infer C
+      ? C extends { discord?: infer D }
+        ? D
+        : never
+      : never;
+    return {
+      ...base,
+      discordConfig: discordCfg,
+      cfg: {
+        ...base.cfg,
+        channels: {
+          ...base.cfg.channels,
+          discord: discordCfg,
+        },
+      } as OpenClawConfig,
+    };
+  };
+
+  const createEditEventData = (overrides: {
+    messageId?: string;
+    channelId?: string;
+    content?: string;
+    editedTimestamp?: string | null;
+    authorId?: string;
+    authorBot?: boolean;
+  }) => {
+    const channelId = overrides.channelId ?? "ch-edit";
+    const messageId = overrides.messageId ?? "m-edit";
+    return {
+      channel_id: channelId,
+      author: { id: overrides.authorId ?? "user-edit" },
+      message: {
+        id: messageId,
+        channel_id: channelId,
+        content: overrides.content ?? "hello (edited)",
+        edited_timestamp:
+          overrides.editedTimestamp === undefined
+            ? "2026-04-29T12:00:00.000Z"
+            : overrides.editedTimestamp,
+        author: {
+          id: overrides.authorId ?? "user-edit",
+          bot: overrides.authorBot ?? false,
+        },
+        attachments: [],
+      },
+    };
+  };
+
+  it("exposes an edit handler when handleEdits is true", () => {
+    preflightDiscordMessageMock.mockReset();
+    processDiscordMessageMock.mockReset();
+
+    const handler = createDiscordMessageHandler(createEditParams());
+    expect(typeof handler.handleEdit).toBe("function");
+  });
+
+  it("re-runs preflight for a user edit", async () => {
+    preflightDiscordMessageMock.mockReset();
+    processDiscordMessageMock.mockReset();
+    preflightDiscordMessageMock.mockImplementation(
+      async (params: { data: { channel_id: string } }) => ({
+        ...createDiscordPreflightContext(params.data.channel_id),
+        accountId: "default",
+        token: "test-token",
+        textLimit: 2_000,
+        replyToMode: "off" as const,
+        discordConfig: { enabled: true, token: "test-token" },
+      }),
+    );
+
+    const handler = createDiscordMessageHandler(createEditParams());
+    expect(handler.handleEdit).toBeDefined();
+    await expect(
+      handler.handleEdit!(createEditEventData({ messageId: "m-e1" }) as never, {} as never),
+    ).resolves.toBeUndefined();
+    await flushQueueWork();
+    expect(preflightDiscordMessageMock).toHaveBeenCalledTimes(1);
+    expect(processDiscordMessageMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops MESSAGE_UPDATE events without edited_timestamp (embed unfurls etc.)", async () => {
+    preflightDiscordMessageMock.mockReset();
+    processDiscordMessageMock.mockReset();
+
+    const handler = createDiscordMessageHandler(createEditParams());
+    await expect(
+      handler.handleEdit!(
+        createEditEventData({ messageId: "m-e2", editedTimestamp: null }) as never,
+        {} as never,
+      ),
+    ).resolves.toBeUndefined();
+    await flushQueueWork();
+    expect(preflightDiscordMessageMock).not.toHaveBeenCalled();
+    expect(processDiscordMessageMock).not.toHaveBeenCalled();
+  });
+
+  it("drops bot-authored edits", async () => {
+    preflightDiscordMessageMock.mockReset();
+    processDiscordMessageMock.mockReset();
+
+    const params = createEditParams();
+    const handler = createDiscordMessageHandler(params);
+    await expect(
+      handler.handleEdit!(
+        createEditEventData({
+          messageId: "m-e3",
+          authorId: params.botUserId,
+          authorBot: true,
+        }) as never,
+        {} as never,
+      ),
+    ).resolves.toBeUndefined();
+    await flushQueueWork();
+    expect(preflightDiscordMessageMock).not.toHaveBeenCalled();
+    expect(processDiscordMessageMock).not.toHaveBeenCalled();
+  });
+
+  it("deduplicates repeat deliveries of the same edit (same edited_timestamp)", async () => {
+    preflightDiscordMessageMock.mockReset();
+    processDiscordMessageMock.mockReset();
+    preflightDiscordMessageMock.mockImplementation(
+      async (params: { data: { channel_id: string } }) => ({
+        ...createDiscordPreflightContext(params.data.channel_id),
+        accountId: "default",
+        token: "test-token",
+        textLimit: 2_000,
+        replyToMode: "off" as const,
+        discordConfig: { enabled: true, token: "test-token" },
+      }),
+    );
+
+    const handler = createDiscordMessageHandler(createEditParams());
+    const duplicate = createEditEventData({
+      messageId: "m-e4",
+      editedTimestamp: "2026-04-29T12:05:00.000Z",
+    });
+    await expect(handler.handleEdit!(duplicate as never, {} as never)).resolves.toBeUndefined();
+    await expect(handler.handleEdit!(duplicate as never, {} as never)).resolves.toBeUndefined();
+    await flushQueueWork();
+    expect(preflightDiscordMessageMock).toHaveBeenCalledTimes(1);
+    expect(processDiscordMessageMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-runs when the same message is edited again (different edited_timestamp)", async () => {
+    preflightDiscordMessageMock.mockReset();
+    processDiscordMessageMock.mockReset();
+    preflightDiscordMessageMock.mockImplementation(
+      async (params: { data: { channel_id: string } }) => ({
+        ...createDiscordPreflightContext(params.data.channel_id),
+        accountId: "default",
+        token: "test-token",
+        textLimit: 2_000,
+        replyToMode: "off" as const,
+        discordConfig: { enabled: true, token: "test-token" },
+      }),
+    );
+
+    const handler = createDiscordMessageHandler(createEditParams());
+    await expect(
+      handler.handleEdit!(
+        createEditEventData({
+          messageId: "m-e5",
+          editedTimestamp: "2026-04-29T12:00:00.000Z",
+          content: "first edit",
+        }) as never,
+        {} as never,
+      ),
+    ).resolves.toBeUndefined();
+    await flushQueueWork();
+
+    await expect(
+      handler.handleEdit!(
+        createEditEventData({
+          messageId: "m-e5",
+          editedTimestamp: "2026-04-29T12:01:00.000Z",
+          content: "second edit",
+        }) as never,
+        {} as never,
+      ),
+    ).resolves.toBeUndefined();
+    await flushQueueWork();
+
+    expect(preflightDiscordMessageMock).toHaveBeenCalledTimes(2);
+    expect(processDiscordMessageMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("coalesces rapid edits to the same message via the edit debouncer", async () => {
+    vi.useFakeTimers();
+    try {
+      preflightDiscordMessageMock.mockReset();
+      processDiscordMessageMock.mockReset();
+      preflightDiscordMessageMock.mockImplementation(
+        async (params: { data: { channel_id: string } }) => ({
+          ...createDiscordPreflightContext(params.data.channel_id),
+          accountId: "default",
+          token: "test-token",
+          textLimit: 2_000,
+          replyToMode: "off" as const,
+          discordConfig: { enabled: true, token: "test-token" },
+        }),
+      );
+
+      const handler = createDiscordMessageHandler(createEditParams({ editDebounceMs: 500 }));
+      await handler.handleEdit!(
+        createEditEventData({
+          messageId: "m-e6",
+          editedTimestamp: "2026-04-29T12:10:00.000Z",
+          content: "keystroke a",
+        }) as never,
+        {} as never,
+      );
+      await handler.handleEdit!(
+        createEditEventData({
+          messageId: "m-e6",
+          editedTimestamp: "2026-04-29T12:10:01.000Z",
+          content: "keystroke ab",
+        }) as never,
+        {} as never,
+      );
+
+      // No flush before the debounce interval elapses.
+      await flushQueueWork();
+      expect(preflightDiscordMessageMock).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(600);
+      await flushQueueWork();
+
+      expect(preflightDiscordMessageMock).toHaveBeenCalledTimes(1);
+      expect(processDiscordMessageMock).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
