@@ -1,4 +1,4 @@
-import { resolveEmojiAndHomepage } from "./entry-metadata.js";
+import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import {
   evaluateRequirementsFromMetadataWithRemote,
   type RequirementConfigCheck,
@@ -7,21 +7,19 @@ import {
   type RequirementsMetadata,
 } from "./requirements.js";
 
-export type EntryMetadataRequirementsParams = Parameters<
-  typeof evaluateEntryMetadataRequirements
->[0];
-
-export function evaluateEntryMetadataRequirements(params: {
+/** Evaluates skill and hook presentation metadata and requirements on the current platform. */
+export function evaluateEntryRequirementsForCurrentPlatform(params: {
   always: boolean;
-  metadata?: (RequirementsMetadata & { emoji?: string; homepage?: string }) | null;
-  frontmatter?: {
-    emoji?: string;
-    homepage?: string;
-    website?: string;
-    url?: string;
-  } | null;
+  entry: {
+    metadata?: (RequirementsMetadata & { emoji?: string; homepage?: string }) | null;
+    frontmatter?: {
+      emoji?: string;
+      homepage?: string;
+      website?: string;
+      url?: string;
+    } | null;
+  };
   hasLocalBin: (bin: string) => boolean;
-  localPlatform: string;
   remote?: RequirementRemote;
   isEnvSatisfied: (envName: string) => boolean;
   isConfigSatisfied: (pathStr: string) => boolean;
@@ -33,15 +31,17 @@ export function evaluateEntryMetadataRequirements(params: {
   requirementsSatisfied: boolean;
   configChecks: RequirementConfigCheck[];
 } {
-  const { emoji, homepage } = resolveEmojiAndHomepage({
-    metadata: params.metadata,
-    frontmatter: params.frontmatter,
-  });
+  const { metadata, frontmatter } = params.entry;
+  const emoji = metadata?.emoji ?? frontmatter?.emoji;
+  // Explicit blank values suppress lower-priority aliases; normalize only after selection.
+  const homepage = normalizeOptionalString(
+    metadata?.homepage ?? frontmatter?.homepage ?? frontmatter?.website ?? frontmatter?.url,
+  );
   const { required, missing, eligible, configChecks } = evaluateRequirementsFromMetadataWithRemote({
     always: params.always,
-    metadata: params.metadata ?? undefined,
+    metadata: metadata ?? undefined,
     hasLocalBin: params.hasLocalBin,
-    localPlatform: params.localPlatform,
+    localPlatform: process.platform,
     remote: params.remote,
     isEnvSatisfied: params.isEnvSatisfied,
     isConfigSatisfied: params.isConfigSatisfied,
@@ -54,13 +54,4 @@ export function evaluateEntryMetadataRequirements(params: {
     requirementsSatisfied: eligible,
     configChecks,
   };
-}
-
-export function evaluateEntryMetadataRequirementsForCurrentPlatform(
-  params: Omit<EntryMetadataRequirementsParams, "localPlatform">,
-): ReturnType<typeof evaluateEntryMetadataRequirements> {
-  return evaluateEntryMetadataRequirements({
-    ...params,
-    localPlatform: process.platform,
-  });
 }
