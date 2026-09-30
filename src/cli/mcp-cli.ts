@@ -44,6 +44,7 @@ import { runTasksWithConcurrency } from "../utils/run-with-concurrency.js";
 import { formatCliCommand } from "./command-format.js";
 import { formatCliJsonFailure } from "./failure-output.js";
 import { resolveGatewayAuthOptions } from "./gateway-secret-options.js";
+import { parseKeyValueEntries, parseMcpServeEdgeAuthHeaders } from "./mcp-key-value.js";
 import { requestExitAfterOneShotOutput } from "./one-shot-exit.js";
 import { collectOption } from "./program/helpers.js";
 import { applyParentDefaultHelpAction } from "./program/parent-default-help.js";
@@ -126,49 +127,6 @@ type McpServerControlOptions = {
 function parseCsvList(value: string | undefined): string[] | undefined {
   const entries = normalizeCsvOrLooseStringList(value);
   return entries.length > 0 ? entries : undefined;
-}
-
-async function parseMcpServeEdgeAuthHeaders(
-  values: readonly string[] | undefined,
-): Promise<Record<string, string> | undefined> {
-  const parsed = parseKeyValueEntries(values, "--header");
-  if (!parsed) {
-    return undefined;
-  }
-  try {
-    const { normalizeEdgeAuthHeadersConfig } = await import("../gateway/edge-auth.js");
-    const normalized = normalizeEdgeAuthHeadersConfig(parsed);
-    if (!normalized) {
-      return undefined;
-    }
-    const headers: Record<string, string> = {};
-    for (const [name, value] of Object.entries(normalized)) {
-      if (typeof value !== "string") {
-        throw new Error(`--header ${JSON.stringify(name)} must be a literal value.`);
-      }
-      headers[name] = value;
-    }
-    return headers;
-  } catch (err) {
-    fail(formatErrorMessage(err));
-  }
-}
-
-function parseKeyValueEntries(values: readonly string[] | undefined, label: string) {
-  const entries: Record<string, string> = {};
-  for (const raw of values ?? []) {
-    const separatorIndex = raw.indexOf("=");
-    if (separatorIndex <= 0) {
-      fail(`${label} entries must use KEY=VALUE.`);
-    }
-    const key = raw.slice(0, separatorIndex).trim();
-    const value = raw.slice(separatorIndex + 1);
-    if (!key) {
-      fail(`${label} entries must use a non-empty key.`);
-    }
-    entries[key] = value;
-  }
-  return Object.keys(entries).length > 0 ? entries : undefined;
 }
 
 function parsePositiveNumberOption(value: string | undefined, label: string): number | undefined {
@@ -751,6 +709,7 @@ export function registerMcpCli(program: Command) {
     .action(async (opts) => {
       const gatewayEdgeAuthHeaders = await parseMcpServeEdgeAuthHeaders(
         opts.header as string[] | undefined,
+        fail,
       );
       try {
         const { gatewayToken, gatewayPassword } = resolveGatewayAuthOptions(opts);
@@ -1055,13 +1014,13 @@ export function registerMcpCli(program: Command) {
           if (opts.arg && opts.arg.length > 0) {
             server.args = opts.arg;
           }
-          setOptionalField(server, "env", parseKeyValueEntries(opts.env, "--env"));
+          setOptionalField(server, "env", parseKeyValueEntries(opts.env, "--env", fail));
           setOptionalField(server, "cwd", normalizeStringifiedOptionalString(opts.cwd));
         }
         if (url) {
           server.url = url;
           setOptionalField(server, "transport", normalizeStringifiedOptionalString(opts.transport));
-          setOptionalField(server, "headers", parseKeyValueEntries(opts.header, "--header"));
+          setOptionalField(server, "headers", parseKeyValueEntries(opts.header, "--header", fail));
           applyMcpOAuthOptions(server, opts, false);
           applyMcpTlsOptions(server, opts);
         }

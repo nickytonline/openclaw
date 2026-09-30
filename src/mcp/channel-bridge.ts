@@ -690,11 +690,11 @@ async function resolveMcpGatewayEdgeAuthHeaders(params: {
     return undefined;
   }
   // Same refusal GatewayClient uses, before the client exists and before secrets resolve.
-  let protocol = "";
+  let protocol: string;
   try {
     protocol = new URL(params.targetUrl).protocol;
   } catch {
-    protocol = "";
+    throw new Error(EDGE_AUTH_WSS_ERROR);
   }
   if (protocol !== "wss:") {
     throw new Error(EDGE_AUTH_WSS_ERROR);
