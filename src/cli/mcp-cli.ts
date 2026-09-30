@@ -44,6 +44,7 @@ import { runTasksWithConcurrency } from "../utils/run-with-concurrency.js";
 import { formatCliCommand } from "./command-format.js";
 import { formatCliJsonFailure } from "./failure-output.js";
 import { resolveGatewayAuthOptions } from "./gateway-secret-options.js";
+import { parseKeyValueEntries, parseMcpServeEdgeAuthHeaders } from "./mcp-key-value.js";
 import { requestExitAfterOneShotOutput } from "./one-shot-exit.js";
 import { collectOption } from "./program/helpers.js";
 import { applyParentDefaultHelpAction } from "./program/parent-default-help.js";
@@ -126,23 +127,6 @@ type McpServerControlOptions = {
 function parseCsvList(value: string | undefined): string[] | undefined {
   const entries = normalizeCsvOrLooseStringList(value);
   return entries.length > 0 ? entries : undefined;
-}
-
-function parseKeyValueEntries(values: readonly string[] | undefined, label: string) {
-  const entries: Record<string, string> = {};
-  for (const raw of values ?? []) {
-    const separatorIndex = raw.indexOf("=");
-    if (separatorIndex <= 0) {
-      fail(`${label} entries must use KEY=VALUE.`);
-    }
-    const key = raw.slice(0, separatorIndex).trim();
-    const value = raw.slice(separatorIndex + 1);
-    if (!key) {
-      fail(`${label} entries must use a non-empty key.`);
-    }
-    entries[key] = value;
-  }
-  return Object.keys(entries).length > 0 ? entries : undefined;
 }
 
 function parsePositiveNumberOption(value: string | undefined, label: string): number | undefined {
@@ -711,12 +695,22 @@ export function registerMcpCli(program: Command) {
     .option("--password <password>", "Gateway password (if required)")
     .option("--password-file <path>", "Read gateway password from file")
     .option(
+      "--header <key=value>",
+      "Repeatable Gateway upgrade header (wss:// only)",
+      collectOption,
+      [],
+    )
+    .option(
       "--claude-channel-mode <mode>",
       "Claude channel notification mode: auto, on, or off",
       "auto",
     )
     .option("-v, --verbose", "Verbose logging to stderr", false)
     .action(async (opts) => {
+      const gatewayEdgeAuthHeaders = await parseMcpServeEdgeAuthHeaders(
+        opts.header as string[] | undefined,
+        fail,
+      );
       try {
         const { gatewayToken, gatewayPassword } = resolveGatewayAuthOptions(opts);
         const claudeChannelMode = normalizeLowercaseStringOrEmpty(
@@ -734,6 +728,7 @@ export function registerMcpCli(program: Command) {
           gatewayUrl: opts.url as string | undefined,
           gatewayToken,
           gatewayPassword,
+          ...(gatewayEdgeAuthHeaders ? { gatewayEdgeAuthHeaders } : {}),
           claudeChannelMode,
           verbose: Boolean(opts.verbose),
         });
@@ -1019,13 +1014,13 @@ export function registerMcpCli(program: Command) {
           if (opts.arg && opts.arg.length > 0) {
             server.args = opts.arg;
           }
-          setOptionalField(server, "env", parseKeyValueEntries(opts.env, "--env"));
+          setOptionalField(server, "env", parseKeyValueEntries(opts.env, "--env", fail));
           setOptionalField(server, "cwd", normalizeStringifiedOptionalString(opts.cwd));
         }
         if (url) {
           server.url = url;
           setOptionalField(server, "transport", normalizeStringifiedOptionalString(opts.transport));
-          setOptionalField(server, "headers", parseKeyValueEntries(opts.header, "--header"));
+          setOptionalField(server, "headers", parseKeyValueEntries(opts.header, "--header", fail));
           applyMcpOAuthOptions(server, opts, false);
           applyMcpTlsOptions(server, opts);
         }

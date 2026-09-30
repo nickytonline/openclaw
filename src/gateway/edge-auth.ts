@@ -44,6 +44,30 @@ export function normalizeEdgeAuthHeadersConfig(value: unknown): EdgeAuthHeadersC
   return Object.fromEntries(normalizedEntries);
 }
 
+/** Later headers replace earlier ones when names differ only by case, and keep the later name. */
+export function overlayEdgeAuthHeadersConfig(
+  base: EdgeAuthHeadersConfig | undefined,
+  overlay: EdgeAuthHeadersConfig | undefined,
+): EdgeAuthHeadersConfig | undefined {
+  if (!overlay) {
+    return base;
+  }
+  if (!base) {
+    return overlay;
+  }
+  const overridden = new Set(Object.keys(overlay).map((name) => name.toLowerCase()));
+  const merged: EdgeAuthHeadersConfig = {};
+  for (const [name, value] of Object.entries(base)) {
+    if (!overridden.has(name.toLowerCase())) {
+      merged[name] = value;
+    }
+  }
+  for (const [name, value] of Object.entries(overlay)) {
+    merged[name] = value;
+  }
+  return merged;
+}
+
 export async function resolveEdgeAuthHeaders(params: {
   config: OpenClawConfig;
   value?: EdgeAuthHeadersConfig;

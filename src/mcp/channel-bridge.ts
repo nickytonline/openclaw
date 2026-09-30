@@ -80,6 +80,7 @@ export class OpenClawChannelBridge {
       gatewayUrl?: string;
       gatewayToken?: string;
       gatewayPassword?: string;
+      gatewayEdgeAuthHeaders?: Readonly<Record<string, string>>;
       claudeChannelMode: ClaudeChannelMode;
       verbose: boolean;
     },
@@ -126,11 +127,22 @@ export class OpenClawChannelBridge {
       this.readiness.resolve();
       return;
     }
+    const edgeAuthHeaders = await resolveMcpGatewayEdgeAuthHeaders({
+      config: this.cfg,
+      targetUrl: bootstrap.url,
+      cliHeaders: this.params.gatewayEdgeAuthHeaders,
+      env: process.env,
+    });
+    if (this.closed) {
+      this.readiness.resolve();
+      return;
+    }
 
     this.gateway = new GatewayClientCtor({
       url: bootstrap.url,
       deviceAuthScope: bootstrap.deviceAuthScope,
       ...(bootstrap.sshTunnel ? { sshTunnel: bootstrap.sshTunnel } : {}),
+      ...(edgeAuthHeaders ? { edgeAuthHeaders } : {}),
       token: bootstrap.auth.token,
       password: bootstrap.auth.password,
       preauthHandshakeTimeoutMs: bootstrap.preauthHandshakeTimeoutMs,
@@ -646,6 +658,53 @@ export class OpenClawChannelBridge {
       },
     });
   }
+}
+
+const EDGE_AUTH_WSS_ERROR = "edge auth headers require a wss:// Gateway URL";
+
+async function resolveMcpGatewayEdgeAuthHeaders(params: {
+  config: OpenClawConfig;
+  targetUrl: string;
+  cliHeaders?: Readonly<Record<string, string>>;
+  env: NodeJS.ProcessEnv;
+}): Promise<Readonly<Record<string, string>> | undefined> {
+  const {
+    gatewayEdgeAuthValueForTarget,
+    normalizeEdgeAuthHeadersConfig,
+    overlayEdgeAuthHeadersConfig,
+    resolveEdgeAuthHeaders,
+  } = await import("../gateway/edge-auth.js");
+  // Configured edge auth stays origin-scoped. CLI headers apply to this connect URL.
+  const configured = normalizeEdgeAuthHeadersConfig(
+    gatewayEdgeAuthValueForTarget({
+      config: params.config,
+      targetUrl: params.targetUrl,
+    }),
+  );
+  const cli =
+    params.cliHeaders && Object.keys(params.cliHeaders).length > 0
+      ? normalizeEdgeAuthHeadersConfig(params.cliHeaders)
+      : undefined;
+  const merged = overlayEdgeAuthHeadersConfig(configured, cli);
+  if (!merged) {
+    return undefined;
+  }
+  // Same refusal GatewayClient uses, before the client exists and before secrets resolve.
+  let protocol: string;
+  try {
+    protocol = new URL(params.targetUrl).protocol;
+  } catch {
+    throw new Error(EDGE_AUTH_WSS_ERROR);
+  }
+  if (protocol !== "wss:") {
+    throw new Error(EDGE_AUTH_WSS_ERROR);
+  }
+  return resolveEdgeAuthHeaders({
+    config: params.config,
+    value: merged,
+    targetUrl: params.targetUrl,
+    env: params.env,
+  });
 }
 
 function shouldRetryInitialMcpGatewayConnect(error: Error): boolean {
