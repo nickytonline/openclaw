@@ -1012,6 +1012,64 @@ describe("mcp cli", () => {
     });
   });
 
+  it("rejects invalid mcp serve upgrade headers before connect", async () => {
+    await withTempHome("openclaw-cli-mcp-home-", async () => {
+      await expect(
+        runMcpCommand(["mcp", "serve", "--header", "Host=gateway.example"]),
+      ).rejects.toThrow("__exit__:1");
+      expect(lastErrorLine()).toBe(
+        'gateway.remote.edgeAuth cannot set transport-owned header "Host"',
+      );
+
+      await expect(
+        runMcpCommand([
+          "mcp",
+          "serve",
+          "--header",
+          "X-Forwarded-User=first@example.com",
+          "--header",
+          "x-forwarded-user=second@example.com",
+        ]),
+      ).rejects.toThrow("__exit__:1");
+      expect(lastErrorLine()).toContain("differ only by case");
+
+      await expect(runMcpCommand(["mcp", "serve", "--header", "X-Edge-Auth="])).rejects.toThrow(
+        "__exit__:1",
+      );
+      expect(lastErrorLine()).toContain("expected a non-empty SecretInput");
+      expect(serveOpenClawChannelMcp).not.toHaveBeenCalled();
+    });
+  });
+
+  it("keeps the last repeated mcp serve upgrade header", async () => {
+    await withTempHome("openclaw-cli-mcp-home-", async () => {
+      await runMcpCommand([
+        "mcp",
+        "serve",
+        "--url",
+        "wss://gateway.example",
+        "--header",
+        "x-forwarded-user=first@example.com",
+        "--header",
+        "x-forwarded-user=last@example.com",
+        "--header",
+        "x-forwarded-proto=https",
+      ]);
+
+      expect(serveOpenClawChannelMcp).toHaveBeenCalledWith({
+        gatewayUrl: "wss://gateway.example",
+        gatewayToken: undefined,
+        gatewayPassword: undefined,
+        gatewayEdgeAuthHeaders: {
+          "x-forwarded-user": "last@example.com",
+          "x-forwarded-proto": "https",
+        },
+        claudeChannelMode: "auto",
+        verbose: false,
+      });
+    });
+  });
+
   it("starts the channel bridge with parsed serve options", async () => {
     await withMcpHome(async (_home, workspaceDir) => {
       const tokenFile = path.join(workspaceDir, "gateway.token");

@@ -13,6 +13,7 @@ vi.mock("../secrets/resolve-secret-input-string.js", async (importOriginal) => {
 import {
   gatewayEdgeAuthValueForTarget,
   normalizeEdgeAuthHeadersConfig,
+  overlayEdgeAuthHeadersConfig,
   resolveEdgeAuthHeaders,
 } from "./edge-auth.js";
 
@@ -126,6 +127,33 @@ describe("gateway edge auth headers", () => {
     expect(
       gatewayEdgeAuthValueForTarget({ config, targetUrl: "wss://other.example/rpc" }),
     ).toBeUndefined();
+  });
+
+  it("overlays later headers case-insensitively and keeps the later name", () => {
+    const base = normalizeEdgeAuthHeadersConfig({
+      "X-Forwarded-User": { source: "env", provider: "default", id: "EDGE_USER" },
+      "X-Edge-Auth": "configured-secret",
+    });
+    const overlay = normalizeEdgeAuthHeadersConfig({
+      "x-forwarded-user": "user@example.com",
+    });
+
+    expect(overlayEdgeAuthHeadersConfig(base, overlay)).toEqual({
+      "X-Edge-Auth": "configured-secret",
+      "x-forwarded-user": "user@example.com",
+    });
+    expect(base).toEqual({
+      "X-Forwarded-User": { source: "env", provider: "default", id: "EDGE_USER" },
+      "X-Edge-Auth": "configured-secret",
+    });
+  });
+
+  it("returns the only present header map", () => {
+    const headers = normalizeEdgeAuthHeadersConfig({ "X-Edge-Auth": "configured-secret" });
+
+    expect(overlayEdgeAuthHeadersConfig(headers, undefined)).toEqual(headers);
+    expect(overlayEdgeAuthHeadersConfig(undefined, headers)).toEqual(headers);
+    expect(overlayEdgeAuthHeadersConfig(undefined, undefined)).toBeUndefined();
   });
 
   it("rejects non-WSS targets before materializing edge-auth secrets", async () => {

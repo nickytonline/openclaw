@@ -128,6 +128,32 @@ function parseCsvList(value: string | undefined): string[] | undefined {
   return entries.length > 0 ? entries : undefined;
 }
 
+async function parseMcpServeEdgeAuthHeaders(
+  values: readonly string[] | undefined,
+): Promise<Record<string, string> | undefined> {
+  const parsed = parseKeyValueEntries(values, "--header");
+  if (!parsed) {
+    return undefined;
+  }
+  try {
+    const { normalizeEdgeAuthHeadersConfig } = await import("../gateway/edge-auth.js");
+    const normalized = normalizeEdgeAuthHeadersConfig(parsed);
+    if (!normalized) {
+      return undefined;
+    }
+    const headers: Record<string, string> = {};
+    for (const [name, value] of Object.entries(normalized)) {
+      if (typeof value !== "string") {
+        throw new Error(`--header ${JSON.stringify(name)} must be a literal value.`);
+      }
+      headers[name] = value;
+    }
+    return headers;
+  } catch (err) {
+    fail(formatErrorMessage(err));
+  }
+}
+
 function parseKeyValueEntries(values: readonly string[] | undefined, label: string) {
   const entries: Record<string, string> = {};
   for (const raw of values ?? []) {
@@ -711,12 +737,21 @@ export function registerMcpCli(program: Command) {
     .option("--password <password>", "Gateway password (if required)")
     .option("--password-file <path>", "Read gateway password from file")
     .option(
+      "--header <key=value>",
+      "Repeatable Gateway upgrade header (wss:// only)",
+      collectOption,
+      [],
+    )
+    .option(
       "--claude-channel-mode <mode>",
       "Claude channel notification mode: auto, on, or off",
       "auto",
     )
     .option("-v, --verbose", "Verbose logging to stderr", false)
     .action(async (opts) => {
+      const gatewayEdgeAuthHeaders = await parseMcpServeEdgeAuthHeaders(
+        opts.header as string[] | undefined,
+      );
       try {
         const { gatewayToken, gatewayPassword } = resolveGatewayAuthOptions(opts);
         const claudeChannelMode = normalizeLowercaseStringOrEmpty(
@@ -734,6 +769,7 @@ export function registerMcpCli(program: Command) {
           gatewayUrl: opts.url as string | undefined,
           gatewayToken,
           gatewayPassword,
+          ...(gatewayEdgeAuthHeaders ? { gatewayEdgeAuthHeaders } : {}),
           claudeChannelMode,
           verbose: Boolean(opts.verbose),
         });

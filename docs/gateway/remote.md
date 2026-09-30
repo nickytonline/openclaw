@@ -246,6 +246,13 @@ invokes the exact command an operator configures. Resolved edge-auth headers are
 sent only when the target matches the configured `gateway.remote.url` scope,
 only over `wss://`, and never across redirects.
 
+`openclaw mcp serve` sends that same configured map when its Gateway target
+matches `gateway.remote.url`. A repeatable `--header key=value` on that command
+overlays the map for the URL the process connects to, including a different
+origin. The CLI value wins when the header names match, ignoring case. CLI
+headers are still sent only over `wss://`. See
+[Run OpenClaw as an MCP server](/cli/mcp/serve#mcp-serve-edge-auth).
+
 ## Credential precedence
 
 Gateway credential resolution follows one shared contract across call/probe/status paths and Discord exec-approval monitoring. Node-host uses the same contract with one local-mode exception (it ignores `gateway.remote.*`).

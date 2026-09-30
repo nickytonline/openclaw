@@ -117,6 +117,14 @@ This gives MCP clients one place to:
     openclaw mcp serve --claude-channel-mode off
     ```
   </Tab>
+  <Tab title="Identity-aware proxy">
+    ```bash
+    openclaw mcp serve \
+      --url wss://gateway.internal \
+      --header "x-forwarded-user=user@example.com" \
+      --header "x-forwarded-proto=https"
+    ```
+  </Tab>
 </Tabs>
 
 ### Bridge tools
@@ -245,6 +253,40 @@ Example stdio client config:
 
 For most generic MCP clients, start with the standard tool surface and ignore Claude mode. Turn Claude mode on only for clients that actually understand the Claude-specific notification methods.
 
+A trusted wrapper that already authenticated the operator can pass that identity on the Gateway upgrade:
+
+```json
+{
+  "mcpServers": {
+    "openclaw": {
+      "command": "openclaw",
+      "args": [
+        "mcp",
+        "serve",
+        "--url",
+        "wss://gateway.internal",
+        "--header",
+        "x-forwarded-user=user@example.com",
+        "--header",
+        "x-forwarded-proto=https"
+      ]
+    }
+  }
+}
+```
+
+<a id="mcp-serve-edge-auth" />
+
+### Identity-aware proxy
+
+When `mcp serve` connects to the Gateway URL in `gateway.remote.url`, it sends [`gateway.remote.edgeAuth`](/gateway/remote#gateway-behind-an-identity-aware-proxy) on the WebSocket upgrade. That is the same client path the TUI, probe, and `gateway call` already use. Header values stay [SecretInputs](/gateway/remote#gateway-behind-an-identity-aware-proxy) (`env`, `file`, `exec`, or `store`).
+
+`--header key=value` overlays that map for the URL this process connects to, including an origin that does not match `gateway.remote.url`. Repeating the same header name keeps the last value. A CLI header replaces a configured header when the names match, ignoring case. Configured headers and CLI headers are sent only over `wss://`.
+
+`mcp serve` does not decide who the operator is. In `gateway.auth.mode: "trusted-proxy"`, the Gateway accepts the configured user header only from a source address in `gateway.trustedProxies`. The process that spawns `mcp serve` has to be that trusted hop, and it has to set the header for a user it has already authenticated. Token auth stays mutually exclusive with trusted-proxy, and password fallback stays local-direct only.
+
+Without `--header` and without `gateway.remote.edgeAuth`, serve still uses the Gateway token or password it already accepted.
+
 ### Options
 
 `openclaw mcp serve` supports:
@@ -263,6 +305,9 @@ For most generic MCP clients, start with the standard tool surface and ignore Cl
 </ParamField>
 <ParamField path="--password-file" type="string">
   Read password from file.
+</ParamField>
+<ParamField path="--header" type="string">
+  Repeatable Gateway WebSocket upgrade header, `key=value`. Sent only for `wss://` targets. Overrides `gateway.remote.edgeAuth` when the header name matches, ignoring case. Repeating the same name keeps the last value.
 </ParamField>
 <ParamField path="--claude-channel-mode" type='"auto" | "on" | "off"'>
   Claude notification mode. Default `auto`.
@@ -285,6 +330,9 @@ That means:
 - `messages_send` can only reply through an existing stored route
 - approval state is live/in-memory only for the current bridge session
 - bridge auth should use the same Gateway token or password controls you would trust for any other remote Gateway client
+- WebSocket upgrade headers come from `gateway.remote.edgeAuth` for the configured remote origin, plus any `--header` values supplied when the process starts
+- those upgrade headers are not MCP initialize params and are not read from stdio framing
+- trusted-proxy identity still requires the connecting source to be listed in `gateway.trustedProxies`; `--header` does not grant that trust
 
 If a conversation is missing from `conversations_list`, the usual cause is not MCP configuration. It is missing or incomplete route metadata in the underlying Gateway session.
 

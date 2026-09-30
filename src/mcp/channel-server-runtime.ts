@@ -18,6 +18,7 @@ export async function createChannelMcpRuntime(
     gatewayUrl?: string;
     gatewayToken?: string;
     gatewayPassword?: string;
+    gatewayEdgeAuthHeaders?: Readonly<Record<string, string>>;
     config?: OpenClawConfig;
     claudeChannelMode?: ClaudeChannelMode;
     verbose?: boolean;
@@ -39,6 +40,7 @@ export async function createChannelMcpRuntime(
     gatewayUrl: opts.gatewayUrl,
     gatewayToken: opts.gatewayToken,
     gatewayPassword: opts.gatewayPassword,
+    gatewayEdgeAuthHeaders: opts.gatewayEdgeAuthHeaders,
     claudeChannelMode,
     verbose: opts.verbose ?? false,
   });

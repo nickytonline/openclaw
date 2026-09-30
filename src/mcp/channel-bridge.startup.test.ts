@@ -79,10 +79,33 @@ vi.mock("../../packages/gateway-protocol/src/client-info.js", () => ({
 
 const { OpenClawChannelBridge } = await import("./channel-bridge.js");
 
+const defaultBootstrapUrl = "wss://127.0.0.1:18789";
+
+function bootstrapResult(url: string) {
+  return {
+    url,
+    urlSource: "local loopback",
+    connectionDetails: {
+      url,
+      urlSource: "local loopback" as const,
+      message: `Gateway target: ${url}`,
+    },
+    tlsFingerprint: "sha256:local",
+    auth: {
+      token: undefined,
+      password: undefined,
+    },
+  };
+}
+
 describe("OpenClawChannelBridge startup", () => {
   beforeEach(() => {
     mockState.clientOptions = null;
     mockState.autoHello = true;
+    resolveGatewayClientBootstrapMock.mockReset();
+    resolveGatewayClientBootstrapMock.mockImplementation(async () =>
+      bootstrapResult(defaultBootstrapUrl),
+    );
   });
 
   it("passes the resolved TLS fingerprint to the Gateway client", async () => {
@@ -120,5 +143,140 @@ describe("OpenClawChannelBridge startup", () => {
 
     await expect(started).resolves.toBeUndefined();
     await bridge.close();
+  });
+
+  it("sends configured edge auth only for the matching wss origin", async () => {
+    const envName = "OPENCLAW_TEST_MCP_EDGE_AUTH";
+    const previous = process.env[envName];
+    process.env[envName] = "resolved-edge-token";
+    resolveGatewayClientBootstrapMock.mockImplementation(async () =>
+      bootstrapResult("wss://gateway.example/rpc"),
+    );
+    const bridge = new OpenClawChannelBridge(
+      {
+        gateway: {
+          mode: "remote",
+          remote: {
+            url: "wss://gateway.example/rpc",
+            edgeAuth: {
+              "X-Edge-Auth": { source: "env", provider: "default", id: envName },
+            },
+          },
+        },
+      } as never,
+      { claudeChannelMode: "off", verbose: false },
+    );
+
+    try {
+      await bridge.start();
+      expect(mockState.clientOptions?.edgeAuthHeaders).toEqual({
+        "X-Edge-Auth": "resolved-edge-token",
+      });
+    } finally {
+      if (previous === undefined) {
+        delete process.env[envName];
+      } else {
+        process.env[envName] = previous;
+      }
+      await bridge.close();
+    }
+  });
+
+  it("lets CLI upgrade headers replace configured headers by case-insensitive name", async () => {
+    resolveGatewayClientBootstrapMock.mockImplementation(async () =>
+      bootstrapResult("wss://gateway.example/rpc"),
+    );
+    const bridge = new OpenClawChannelBridge(
+      {
+        gateway: {
+          mode: "remote",
+          remote: {
+            url: "wss://gateway.example/rpc",
+            edgeAuth: {
+              "X-Forwarded-User": { source: "env", provider: "default", id: "UNSET_EDGE_USER" },
+              "X-Edge-Auth": "configured-secret",
+            },
+          },
+        },
+      } as never,
+      {
+        gatewayEdgeAuthHeaders: { "x-forwarded-user": "user@example.com" },
+        claudeChannelMode: "off",
+        verbose: false,
+      },
+    );
+
+    await bridge.start();
+    expect(mockState.clientOptions?.edgeAuthHeaders).toEqual({
+      "X-Edge-Auth": "configured-secret",
+      "x-forwarded-user": "user@example.com",
+    });
+    await bridge.close();
+  });
+
+  it("sends CLI upgrade headers when the target is outside the configured origin", async () => {
+    resolveGatewayClientBootstrapMock.mockImplementation(async () =>
+      bootstrapResult("wss://other.example/rpc"),
+    );
+    const bridge = new OpenClawChannelBridge(
+      {
+        gateway: {
+          mode: "remote",
+          remote: {
+            url: "wss://gateway.example/rpc",
+            edgeAuth: { "X-Edge-Auth": "configured-secret" },
+          },
+        },
+      } as never,
+      {
+        gatewayEdgeAuthHeaders: { "x-forwarded-proto": "https" },
+        claudeChannelMode: "off",
+        verbose: false,
+      },
+    );
+
+    await bridge.start();
+    expect(mockState.clientOptions?.edgeAuthHeaders).toEqual({
+      "x-forwarded-proto": "https",
+    });
+    await bridge.close();
+  });
+
+  it("omits edge auth headers when neither config nor CLI supplies them", async () => {
+    const bridge = new OpenClawChannelBridge({} as never, {
+      claudeChannelMode: "off",
+      verbose: false,
+    });
+
+    await bridge.start();
+    expect(mockState.clientOptions?.edgeAuthHeaders).toBeUndefined();
+    await bridge.close();
+  });
+
+  it("refuses edge auth headers on ws:// before constructing the Gateway client", async () => {
+    resolveGatewayClientBootstrapMock.mockImplementation(async () =>
+      bootstrapResult("ws://gateway.example/rpc"),
+    );
+    const bridge = new OpenClawChannelBridge(
+      {
+        gateway: {
+          mode: "remote",
+          remote: {
+            url: "ws://gateway.example/rpc",
+            edgeAuth: {
+              "X-Edge-Auth": { source: "env", provider: "default", id: "UNSET_EDGE_AUTH" },
+            },
+          },
+        },
+      } as never,
+      {
+        gatewayEdgeAuthHeaders: { "x-forwarded-user": "user@example.com" },
+        claudeChannelMode: "off",
+        verbose: false,
+      },
+    );
+
+    await expect(bridge.start()).rejects.toThrow("edge auth headers require a wss:// Gateway URL");
+    expect(mockState.clientOptions).toBeNull();
   });
 });
